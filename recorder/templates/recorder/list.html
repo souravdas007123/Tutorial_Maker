@@ -1,0 +1,13 @@
+{% extends "recorder/base.html" %}
+{% block content %}
+<h1>Your tutorials</h1>
+{% for job in jobs %}
+  <a class="card" style="display:block;color:inherit;text-decoration:none" href="{% url 'job_detail' job.pk %}">
+    <strong>{{ job.url }}</strong>
+    <span class="pill {{ job.status }}">{{ job.get_status_display }}</span><br>
+    <span class="muted">{{ job.created_at|date:"d M Y, H:i" }} · {{ job.language|upper }}</span>
+  </a>
+{% empty %}
+  <div class="card">Abhi koi tutorial nahi hai. <a href="{% url 'job_new' %}">Pehla banao →</a></div>
+{% endfor %}
+{% endblock %}

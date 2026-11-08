@@ -1,0 +1,19 @@
+{% extends "recorder/base.html" %}
+{% block content %}
+<h1>New tutorial</h1>
+<form method="post" class="card" autocomplete="off">
+  {% csrf_token %}
+  {% for field in form %}
+    {% if field.name == "consent" %}
+      <div class="checkbox-row"><label>{{ field }} <span>{{ field.label }}</span></label></div>
+    {% else %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+    {% endif %}
+    {% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  {% endfor %}
+  <p class="muted">Credentials are encrypted, used only for this job, and deleted when it finishes.
+     The password is never shown in the video.</p>
+  <button class="btn" type="submit">Explore my app →</button>
+</form>
+{% endblock %}

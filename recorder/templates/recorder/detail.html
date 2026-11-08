@@ -1,0 +1,41 @@
+{% extends "recorder/base.html" %}
+{% block head %}{% if job.in_progress %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
+{% block content %}
+<h1>{{ job.url }} <span class="pill {{ job.status }}">{{ job.get_status_display }}</span></h1>
+
+{% if job.status == "exploring" or job.status == "recording" %}
+  <div class="card">
+    ⏳ {% if job.status == "exploring" %}Logging in and exploring the app…{% else %}Recording your tutorial video… this can take a few minutes.{% endif %}
+    <div class="muted">This page refreshes automatically.</div>
+  </div>
+
+{% elif job.status == "failed" %}
+  <div class="card"><div class="err"><strong>Something went wrong:</strong> {{ job.error }}</div>
+  <p><a class="btn" href="{% url 'job_new' %}">Try again</a></p></div>
+
+{% elif job.status == "awaiting" %}
+  <p class="muted">Here's what we found. Untick pages you don't want and edit the narration, then record.</p>
+  <form method="post" action="{% url 'job_approve' job.pk %}">
+    {% csrf_token %}
+    {% for step in job.steps %}
+      <div class="card step">
+        <img src="/media/{{ step.screenshot }}" alt="{{ step.label }}">
+        <div>
+          <div class="checkbox-row"><label><input type="checkbox" name="include_{{ forloop.counter0 }}" {% if step.include %}checked{% endif %}>
+            <strong>{{ step.label }}</strong></label></div>
+          <div class="muted">{{ step.url }}</div>
+          <label for="n{{ forloop.counter0 }}">Narration</label>
+          <textarea id="n{{ forloop.counter0 }}" name="narration_{{ forloop.counter0 }}">{{ step.narration }}</textarea>
+        </div>
+      </div>
+    {% endfor %}
+    <button class="btn" type="submit">🎬 Record tutorial</button>
+  </form>
+
+{% elif job.status == "done" %}
+  <div class="card">
+    <video src="{{ job.video_url }}" controls></video>
+    <p><a class="btn" href="{{ job.video_url }}" download>Download MP4</a></p>
+  </div>
+{% endif %}
+{% endblock %}
