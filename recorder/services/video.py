@@ -6,7 +6,7 @@ from pathlib import Path
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 
-from . import explorer, interact, tts
+from . import explorer, interact, media_tools, tts
 
 # Visible cursor + click ripple, injected into every page.
 CURSOR_JS = """
@@ -129,7 +129,7 @@ def _mix_audio(clips, out_path: Path, total_seconds: float):
     """clips = [(path, start_seconds)] -> one aac track with each clip delayed to its start."""
     if not clips:
         return False
-    cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+    cmd = [media_tools.ffmpeg_exe(), "-y", "-loglevel", "error"]
     for path, _ in clips:
         cmd += ["-i", str(path)]
     parts = [f"[{i}:a]adelay={int(start * 1000)}|{int(start * 1000)}[a{i}]" for i, (_, start) in enumerate(clips)]
@@ -201,7 +201,7 @@ def record(job, username, password):
     final = work / "tutorial.mp4"
     mixed = work / "voice_mix.m4a"
     have_audio = _mix_audio(clips, mixed, total + 1)
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video_path)]
+    cmd = [media_tools.ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(video_path)]
     if have_audio:
         cmd += ["-i", str(mixed)]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]

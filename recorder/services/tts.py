@@ -4,19 +4,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import media_tools
+
 log = logging.getLogger(__name__)
 
 
 def audio_duration(path: Path) -> float:
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        capture_output=True,
-        text=True,
-    )
-    try:
-        return float(out.stdout.strip())
-    except ValueError:
-        return 0.0
+    return media_tools.duration_seconds(path)
 
 
 def synthesize(text: str, lang: str, out_path: Path):
@@ -37,7 +31,7 @@ def synthesize(text: str, lang: str, out_path: Path):
         subprocess.run([exe, "-v", lang, "-w", str(wav), text], check=False)
         if wav.exists():
             subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav), str(out_path)], check=False
+                [media_tools.ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(wav), str(out_path)], check=False
             )
             wav.unlink(missing_ok=True)
             if out_path.exists():
