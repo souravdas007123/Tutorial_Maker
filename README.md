@@ -20,10 +20,19 @@ python manage.py runserver
 Open http://127.0.0.1:8000/ → **New tutorial**.
 
 ## Flow
-1. **Exploring** – headless login, finds nav links, screenshots each page (skips Logout/Delete/Pay-style links).
+1. **Exploring** – headless login, finds nav links, then on EVERY page clicks each safe control
+   (buttons, tabs, dropdowns, accordions, popup openers). A click that changes the screen becomes its own
+   "action" step with a screenshot; the page is then reset (Esc / toggle / reload) before the next click.
+   Skipped: Logout/Delete/Save/Submit/Pay/Send… labels, form-submit buttons, external tabs.
 2. **Approval** – you untick pages and edit narration.
 3. **Recording** – logs in again *off-camera* (password never in the video), records with a visible cursor,
    gTTS voice-over per page, ffmpeg mixes → `media/jobs/<id>/tutorial.mp4`.
+
+## Safe mode (important)
+`TUTORIAL_BLOCK_WRITES=1` (default) aborts POST/PUT/PATCH/DELETE while exploring and recording, and browser
+confirm() dialogs are dismissed, so clicking can't create/edit/delete data. Search/filter requests are allowed.
+If your app needs POST just to load data (GraphQL), set `TUTORIAL_BLOCK_WRITES=0` and use a throw-away demo account.
+Limits: `TUTORIAL_MAX_PAGES` (8), `TUTORIAL_MAX_ACTIONS` per page (10), `TUTORIAL_MAX_STEPS` total (40).
 
 ## Security notes
 - Credentials are Fernet-encrypted and wiped when the job finishes/fails. Set `TUTORIAL_FERNET_KEY` in production.

@@ -1,4 +1,4 @@
-"""Pass 1: log in to the target app and discover its pages/features."""
+"""Pass 1: log in, discover pages, then CLICK every safe control on each page to find features."""
 import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -7,11 +7,9 @@ from django.conf import settings
 from playwright.sync_api import TimeoutError as PWTimeout
 from playwright.sync_api import sync_playwright
 
-# "Safe mode": never navigate to links that look destructive.
-DANGEROUS = re.compile(
-    r"log ?out|sign ?out|delete|remove|destroy|deactivate|unsubscribe|checkout|\bpay\b|cancel",
-    re.I,
-)
+from . import interact
+
+DANGEROUS = interact.SKIP_LABEL
 
 NAV_JS = """
 () => {
@@ -22,20 +20,6 @@ NAV_JS = """
     label: (e.innerText || e.getAttribute('aria-label') || e.title || '').trim().replace(/\\s+/g, ' '),
     href: e.getAttribute('href') || ''
   }));
-}
-"""
-
-PAGE_INFO_JS = """
-() => {
-  const vis = e => e.offsetParent !== null;
-  const txt = e => (e.innerText || e.value || e.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ');
-  return {
-    headings: Array.from(document.querySelectorAll('h1,h2,h3')).filter(vis).map(txt).filter(Boolean).slice(0, 6),
-    actions: Array.from(document.querySelectorAll('button, [role=button], input[type=submit], [role=tab]'))
-      .filter(vis).map(txt).filter(t => t && t.length < 40).slice(0, 12),
-    fields: Array.from(document.querySelectorAll('input:not([type=hidden]), select, textarea'))
-      .filter(vis).map(e => e.getAttribute('placeholder') || e.getAttribute('name') || e.type).filter(Boolean).slice(0, 10),
-  };
 }
 """
 
@@ -80,8 +64,8 @@ def login(page, url, username, password, timeout=15000):
         )
 
 
-def discover_nav(page, base_url, max_pages):
-    """Return unique same-origin nav links, skipping dangerous-looking ones."""
+def discover_nav(page, max_pages):
+    """Unique same-origin nav links, skipping dangerous-looking ones."""
     origin = urlparse(page.url).netloc
     seen, out = set(), []
     for item in page.evaluate(NAV_JS):
@@ -104,8 +88,60 @@ def discover_nav(page, base_url, max_pages):
     return out
 
 
+def _step(idx, kind, label, url, rel_dir, page, info, parent="", action=None, reset="none"):
+    return {
+        "id": idx,
+        "kind": kind,  # "page" or "action"
+        "label": label,
+        "parent": parent,
+        "url": url,  # the PAGE url this step happens on
+        "action": action,  # {role,name,nth} for kind=action
+        "reset": reset,
+        "screenshot": f"{rel_dir}/shot_{idx}.png",
+        "title": page.title(),
+        "headings": info["headings"],
+        "actions": info["actions"],
+        "fields": info["fields"],
+        "narration": "",
+        "include": True,
+    }
+
+
+def _try_action(page, ctx, target, cand, idx, out_dir, rel_dir):
+    """Click one control. Returns a step dict if it visibly did something, else None."""
+    page_url = target["url"]
+    loc = interact.locate(page, cand)
+    if loc is None:
+        return None
+    before = interact.snapshot(page)
+    url_before = page.url
+    try:
+        loc.scroll_into_view_if_needed(timeout=2000)
+        loc.click(timeout=3000)
+    except Exception:
+        return None
+    interact.settle(page)
+
+    if interact.close_extra_pages(ctx, page):
+        return None  # opened an external tab/popup — not a feature we can show in-page
+    after = interact.snapshot(page)
+    navigated = not interact.same_url(page.url, url_before)
+    if not navigated and after == before:
+        return None  # nothing changed
+
+    new_dialog = after["dialogs"] > before["dialogs"]
+    info = interact.page_info(page, interact.DIALOG_SEL if new_dialog else None)
+    page.screenshot(path=str(out_dir / f"shot_{idx}.png"))
+    label = f"{target['label']} → {cand['name']}"
+    step = _step(idx, "action", label, page_url, rel_dir, page, info, parent=target["label"], action=cand)
+    step["opens_dialog"] = new_dialog
+    step["navigated"] = navigated
+    step["reset"] = interact.find_reset(page, page_url, cand, before)
+    return step
+
+
 def explore(url, username, password, out_dir: Path, rel_dir: str, max_pages=None):
-    """Log in, screenshot the landing page + each nav target. Returns a list of step dicts."""
+    """Log in, screenshot each page, then click each safe control on it. Returns step dicts."""
     max_pages = max_pages or settings.MAX_PAGES
     out_dir.mkdir(parents=True, exist_ok=True)
     w, h = settings.VIDEO_SIZE
@@ -115,41 +151,43 @@ def explore(url, username, password, out_dir: Path, rel_dir: str, max_pages=None
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(viewport={"width": w, "height": h})
         page = ctx.new_page()
+        page.on("dialog", lambda d: d.dismiss())  # confirm()/alert() -> cancel, never accept
         login(page, url, username, password)
+        interact.install_write_block(ctx)  # login done; from here on nothing may change data
 
         landing = page.url
-        nav = discover_nav(page, url, max_pages)
+        nav = discover_nav(page, max_pages)
         targets = [{"label": "Dashboard", "url": landing}] + [
-            n for n in nav if n["url"].rstrip("/") != landing.rstrip("/")
+            n for n in nav if not interact.same_url(n["url"], landing)
         ]
 
-        for i, t in enumerate(targets[: max_pages + 1]):
+        for t in targets[: max_pages + 1]:
+            if len(steps) >= settings.MAX_STEPS:
+                break
             try:
-                if page.url != t["url"]:
+                if not interact.same_url(page.url, t["url"]):
                     page.goto(t["url"], wait_until="domcontentloaded", timeout=30000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
-                except PWTimeout:
-                    pass
-                shot = out_dir / f"shot_{i}.png"
-                page.screenshot(path=str(shot))
-                info = page.evaluate(PAGE_INFO_JS)
+                interact.settle(page, 500)
+                idx = len(steps)
+                page.screenshot(path=str(out_dir / f"shot_{idx}.png"))
+                steps.append(_step(idx, "page", t["label"], t["url"], rel_dir, page, interact.page_info(page)))
+                cands = interact.candidates(page, settings.MAX_ACTIONS_PER_PAGE)
             except Exception:
-                continue  # skip pages that fail to load
-            steps.append(
-                {
-                    "id": i,
-                    "label": t["label"],
-                    "url": t["url"],
-                    "screenshot": f"{rel_dir}/shot_{i}.png",
-                    "title": page.title(),
-                    "headings": info["headings"],
-                    "actions": info["actions"],
-                    "fields": info["fields"],
-                    "narration": "",
-                    "include": True,
-                }
-            )
+                continue
+
+            for cand in cands:
+                if len(steps) >= settings.MAX_STEPS:
+                    break
+                try:
+                    step = _try_action(page, ctx, t, cand, len(steps), out_dir, rel_dir)
+                except Exception:
+                    step = None
+                    try:  # recover to a clean page
+                        page.goto(t["url"], wait_until="domcontentloaded", timeout=30000)
+                    except Exception:
+                        break
+                if step:
+                    steps.append(step)
         browser.close()
 
     if not steps:

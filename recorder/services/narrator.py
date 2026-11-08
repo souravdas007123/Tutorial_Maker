@@ -15,18 +15,32 @@ TEMPLATES = {
         "page": "This is the {label} section. ",
         "headings": "Here you'll find {items}. ",
         "actions": "You can use options like {items}. ",
+        "click": "Now let's click on {name}. ",
+        "dialog": "A window opens where you can work with {items}. ",
+        "result": "This reveals {items}. ",
     },
     "hi": {
         "intro": "नमस्ते! इस ट्यूटोरियल में हम {label} के बारे में जानेंगे। ",
         "page": "यह {label} सेक्शन है। ",
         "headings": "यहाँ आपको {items} दिखेगा। ",
         "actions": "आप {items} जैसे विकल्प इस्तेमाल कर सकते हैं। ",
+        "click": "अब हम {name} पर क्लिक करते हैं। ",
+        "dialog": "यहाँ एक विंडो खुलती है जिसमें आप {items} देख सकते हैं। ",
+        "result": "इससे {items} दिखाई देता है। ",
     },
 }
 
 
 def _fallback(step, lang, first):
     t = TEMPLATES.get(lang, TEMPLATES["en"])
+    if step.get("kind") == "action":
+        name = step["action"]["name"]
+        text = t["click"].format(name=name)
+        items = step["fields"][:3] or step["headings"][:3] or step["actions"][:3]
+        if items:
+            key = "dialog" if step.get("opens_dialog") else "result"
+            text += t[key].format(items=", ".join(items))
+        return text.strip()
     text = t["intro"].format(label=step["label"]) if first else t["page"].format(label=step["label"])
     if step["headings"]:
         text += t["headings"].format(items=", ".join(step["headings"][:3]))
@@ -48,12 +62,22 @@ def _claude_client():
 
 def _claude_narration(client, step, lang, first, last, image_path):
     lang_name = LANG_NAMES.get(lang, "English")
+    kind_line = ""
+    if step.get("kind") == "action":
+        kind_line = (
+            f"This step is a CLICK: the presenter clicks the {step['action']['role']} "
+            f"\"{step['action']['name']}\" on the \"{step['parent']}\" page"
+            f"{' and a dialog/popup opens' if step.get('opens_dialog') else ''}"
+            f"{' and it navigates to a new screen' if step.get('navigated') else ''}. "
+            "The screenshot shows the result AFTER the click. Say what to click, then what it does/shows.\n"
+        )
     prompt = (
         f"You are writing the voice-over for a software tutorial video. Language: {lang_name}.\n"
-        f"Write 2-3 short, friendly sentences (max 55 words) explaining this screen to a new user: "
+        f"Write 2-4 short, friendly sentences (max 70 words) explaining this screen to a new user: "
         f"what it is for and what they can do here. Speak naturally, no markdown, no emojis, "
         f"no URLs.{' This is the first screen: start with a short welcome.' if first else ''}"
         f"{' This is the last screen: end with a one-line wrap-up.' if last else ''}\n\n"
+        f"{kind_line}"
         f"Page name: {step['label']}\nTitle: {step['title']}\n"
         f"Headings: {step['headings']}\nButtons/tabs: {step['actions']}\nInput fields: {step['fields']}\n"
         "Never read out any personal data visible in the screenshot."

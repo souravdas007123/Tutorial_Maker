@@ -73,7 +73,12 @@ LOGIN_REDIRECT_URL = "/"
 FERNET_KEY = os.environ.get("TUTORIAL_FERNET_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
-MAX_PAGES = int(os.environ.get("TUTORIAL_MAX_PAGES", "8"))
+MAX_PAGES = int(os.environ.get("TUTORIAL_MAX_PAGES", "8"))          # nav pages to visit
+MAX_ACTIONS_PER_PAGE = int(os.environ.get("TUTORIAL_MAX_ACTIONS", "10"))  # buttons/tabs clicked per page
+MAX_STEPS = int(os.environ.get("TUTORIAL_MAX_STEPS", "40"))         # hard cap on total video steps
+# Safe mode: abort POST/PUT/PATCH/DELETE while exploring/recording so clicks can't change data.
+# Turn off (=0) only if your app needs POST for reading data (e.g. GraphQL) and you use a throw-away account.
+BLOCK_WRITES = os.environ.get("TUTORIAL_BLOCK_WRITES", "1") == "1"
 VIDEO_SIZE = (1280, 720)
 # SSRF guard: reject URLs that resolve to private/loopback IPs unless this is True.
 ALLOW_PRIVATE_URLS = os.environ.get("TUTORIAL_ALLOW_PRIVATE_URLS", "0") == "1"

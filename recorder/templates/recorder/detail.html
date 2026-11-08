@@ -14,15 +14,16 @@
   <p><a class="btn" href="{% url 'job_new' %}">Try again</a></p></div>
 
 {% elif job.status == "awaiting" %}
-  <p class="muted">Here's what we found. Untick pages you don't want and edit the narration, then record.</p>
+  <p class="muted">We visited each page and clicked its buttons/tabs/popups (only safe ones). Untick pages you don't want and edit the narration, then record.</p>
   <form method="post" action="{% url 'job_approve' job.pk %}">
     {% csrf_token %}
     {% for step in job.steps %}
-      <div class="card step">
+      <div class="card step"{% if step.kind == "action" %} style="margin-left:28px;border-left:4px solid var(--brand)"{% endif %}>
         <img src="/media/{{ step.screenshot }}" alt="{{ step.label }}">
         <div>
           <div class="checkbox-row"><label><input type="checkbox" name="include_{{ forloop.counter0 }}" {% if step.include %}checked{% endif %}>
-            <strong>{{ step.label }}</strong></label></div>
+            <strong>{{ step.label }}</strong></label>
+            {% if step.kind == "action" %}<span class="pill">click · {{ step.action.role }}</span>{% else %}<span class="pill">page</span>{% endif %}</div>
           <div class="muted">{{ step.url }}</div>
           <label for="n{{ forloop.counter0 }}">Narration</label>
           <textarea id="n{{ forloop.counter0 }}" name="narration_{{ forloop.counter0 }}">{{ step.narration }}</textarea>
