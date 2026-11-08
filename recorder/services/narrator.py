@@ -18,6 +18,8 @@ TEMPLATES = {
         "click": "Now let's click on {name}. ",
         "dialog": "A window opens where you can work with {items}. ",
         "result": "This reveals {items}. ",
+        "fill": "Now let's fill in the form. Enter details such as {items}. ",
+        "submit": "Then click {name} to save it. The result appears right on screen. ",
     },
     "hi": {
         "intro": "नमस्ते! इस ट्यूटोरियल में हम {label} के बारे में जानेंगे। ",
@@ -27,12 +29,19 @@ TEMPLATES = {
         "click": "अब हम {name} पर क्लिक करते हैं। ",
         "dialog": "यहाँ एक विंडो खुलती है जिसमें आप {items} देख सकते हैं। ",
         "result": "इससे {items} दिखाई देता है। ",
+        "fill": "अब फ़ॉर्म भरते हैं। यहाँ {items} जैसी जानकारी दर्ज करें। ",
+        "submit": "फिर {name} पर क्लिक करके इसे सेव करें। नतीजा सीधे स्क्रीन पर दिखता है। ",
     },
 }
 
 
 def _fallback(step, lang, first):
     t = TEMPLATES.get(lang, TEMPLATES["en"])
+    if step.get("kind") == "fill":
+        items = [f["label"] for f in step.get("filled", [])][:5]
+        return t["fill"].format(items=", ".join(items)).strip()
+    if step.get("kind") == "submit":
+        return t["submit"].format(name=step.get("submit_name", "Save")).strip()
     if step.get("kind") == "action":
         name = step["action"]["name"]
         text = t["click"].format(name=name)
@@ -70,6 +79,18 @@ def _claude_narration(client, step, lang, first, last, image_path):
             f"{' and a dialog/popup opens' if step.get('opens_dialog') else ''}"
             f"{' and it navigates to a new screen' if step.get('navigated') else ''}. "
             "The screenshot shows the result AFTER the click. Say what to click, then what it does/shows.\n"
+        )
+    if step.get("kind") == "fill":
+        fields = ", ".join(f["label"] for f in step.get("filled", []))
+        kind_line = (
+            f"This step FILLS IN a form with sample data. Fields: {fields}. Explain what each important "
+            "field is for and what kind of value to enter. Do not read sample values out letter by letter.\n"
+        )
+    if step.get("kind") == "submit":
+        kind_line = (
+            f"This step clicks \"{step.get('submit_name', 'Save')}\" to save/submit the form that was just "
+            "filled. The screenshot shows the result (confirmation, new row, validation message...). "
+            "Explain what happened and where the user can see the saved data.\n"
         )
     prompt = (
         f"You are writing the voice-over for a software tutorial video. Language: {lang_name}.\n"

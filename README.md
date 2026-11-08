@@ -28,7 +28,18 @@ Open http://127.0.0.1:8000/ → **New tutorial**.
 3. **Recording** – logs in again *off-camera* (password never in the video), records with a visible cursor,
    gTTS voice-over per page, ffmpeg mixes → `media/jobs/<id>/tutorial.mp4`.
 
-## Safe mode (important)
+## Sidebar groups
+Collapsed sidebar/nav groups (aria-expanded, Bootstrap collapse, dropdown-toggle, has-submenu, treeview, <summary>…) are
+expanded automatically and their child links are added as pages. Links hidden inside collapsed menus are collected too.
+
+## Demo mode (empty test accounts)
+Tick **Demo mode** on the new-tutorial form and the tool will, on every popup form and every page that is a form:
+fill each field with sample data (unique per run), click Save/Submit, and show the result in the video, with narration
+that explains each field. **This creates real records** — use a throw-away demo account only.
+Delete/Remove/Cancel/Pay/Logout-type buttons are still never clicked. Not supported: file uploads, custom date-pickers
+and select2-style widgets (read-only inputs are skipped).
+
+## Safe mode (default, important)
 `TUTORIAL_BLOCK_WRITES=1` (default) aborts POST/PUT/PATCH/DELETE while exploring and recording, and browser
 confirm() dialogs are dismissed, so clicking can't create/edit/delete data. Search/filter requests are allowed.
 If your app needs POST just to load data (GraphQL), set `TUTORIAL_BLOCK_WRITES=0` and use a throw-away demo account.

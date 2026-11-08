@@ -19,6 +19,8 @@ class TutorialJob(models.Model):
     username_enc = models.TextField(blank=True)
     password_enc = models.TextField(blank=True)
     language = models.CharField(max_length=5, default="en")
+    # Demo mode: fill forms with sample data and save them (test accounts only).
+    demo_mode = models.BooleanField(default=False)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.EXPLORING)
     error = models.TextField(blank=True)
     steps = models.JSONField(default=list, blank=True)

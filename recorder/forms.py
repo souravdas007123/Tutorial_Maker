@@ -13,6 +13,11 @@ class JobForm(forms.Form):
     language = forms.ChoiceField(
         label="Narration language", choices=[("en", "English"), ("hi", "हिन्दी (Hindi)")]
     )
+    demo_mode = forms.BooleanField(
+        required=False,
+        label="Demo mode: enter sample data in forms and save it (for empty test accounts only — "
+        "this CREATES records in the app).",
+    )
     consent = forms.BooleanField(
         label="I own this application or have permission to access and record it, "
         "and I'm using a test/demo account."

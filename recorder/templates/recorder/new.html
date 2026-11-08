@@ -4,7 +4,7 @@
 <form method="post" class="card" autocomplete="off">
   {% csrf_token %}
   {% for field in form %}
-    {% if field.name == "consent" %}
+    {% if field.name == "consent" or field.name == "demo_mode" %}
       <div class="checkbox-row"><label>{{ field }} <span>{{ field.label }}</span></label></div>
     {% else %}
       <label for="{{ field.id_for_label }}">{{ field.label }}</label>

@@ -109,7 +109,7 @@ def _show_action(page, ctx, step, hold_seconds):
         except Exception:
             pass
         if interact.dialog_open(page):  # draw the eye to the popup
-            dbox = page.locator(interact.DIALOG_SEL).first.bounding_box()
+            dbox = interact._root(page, interact.DIALOG_SEL).bounding_box()
             if dbox:
                 _glide(page, dbox["x"] + dbox["width"] / 2, dbox["y"] + min(dbox["height"] / 3, 150))
     except Exception:
@@ -123,6 +123,60 @@ def _show_action(page, ctx, step, hold_seconds):
             page.goto(step["url"], wait_until="domcontentloaded", timeout=30000)
         except Exception:
             pass
+
+
+def _glide_to(page, el, steps=25):
+    try:
+        el.scroll_into_view_if_needed(timeout=1500)
+        box = el.bounding_box()
+        if box:
+            _glide(page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps)
+    except Exception:
+        pass
+
+
+def _reset(page, step):
+    try:
+        interact.apply_reset(page, step["url"], step.get("action"), step.get("reset", "none"))
+    except Exception:
+        try:
+            page.goto(step["url"], wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            pass
+
+
+def _show_fill(page, step, hold_seconds):
+    """Demo mode: type sample data into each field, cursor gliding field to field."""
+    started = time.monotonic()
+    scope = step.get("scope") or None
+    if not scope:
+        _ensure_on_page(page, step["url"])
+    interact.fill_form(
+        page, scope, interact.new_token(), slow=True, on_field=lambda el: _glide_to(page, el)
+    )
+    _hold(page, started, hold_seconds)
+    _reset(page, step)
+
+
+def _show_submit(page, ctx, step, hold_seconds):
+    """Demo mode: click Save/Submit and show the result."""
+    started = time.monotonic()
+    btn, _ = interact.find_submit(page, step.get("scope") or None)
+    if btn is not None:
+        try:
+            _glide_to(page, btn, 30)
+            try:
+                btn.evaluate(HIGHLIGHT_ON)
+            except Exception:
+                pass
+            page.wait_for_timeout(800)
+            btn.click(timeout=3000)
+            interact.settle(page, 1500)
+            interact.close_extra_pages(ctx, page)
+        except Exception:
+            pass
+    _hold(page, started, hold_seconds)
+    _reset(page, step)
 
 
 def _mix_audio(clips, out_path: Path, total_seconds: float):
@@ -157,6 +211,8 @@ def record(job, username, password):
         dur = tts.synthesize(s["narration"], job.language, mp3)
         has_audio = bool(dur) and mp3.exists()
         hold = max(MIN_STEP_SECONDS, (dur or 0) + PAD_SECONDS)
+        if s.get("kind") == "fill":  # typing takes time
+            hold = max(hold, 2 + 2.2 * len(s.get("filled", [])))
         prepared.append((s, mp3 if has_audio else None, hold))
 
     # 2) Log in OFF-camera and save cookies — the password never appears in the video.
@@ -174,7 +230,7 @@ def record(job, username, password):
             record_video_size={"width": w, "height": h},
         )
         ctx.add_init_script(CURSOR_JS)
-        interact.install_write_block(ctx)  # safe mode: clicks must not change the user's data
+        interact.install_write_block(ctx, block=not getattr(job, "demo_mode", False))  # safe mode unless demo
         page = ctx.new_page()
         page.on("dialog", lambda d: d.dismiss())
         t0 = time.monotonic()
@@ -184,8 +240,13 @@ def record(job, username, password):
             if mp3:
                 clips.append((mp3, start + 0.2))
             try:
-                if s.get("kind") == "action" and s.get("action"):
+                kind = s.get("kind")
+                if kind == "action" and s.get("action"):
                     _show_action(page, ctx, s, hold)
+                elif kind == "fill":
+                    _show_fill(page, s, hold)
+                elif kind == "submit":
+                    _show_submit(page, ctx, s, hold)
                 else:
                     _show_page(page, s, hold)
             except Exception:

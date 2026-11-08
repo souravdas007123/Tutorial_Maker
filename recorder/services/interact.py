@@ -1,4 +1,5 @@
 """Shared helpers for finding, clicking and undoing UI interactions (used by explore AND record)."""
+import random
 import re
 from urllib.parse import urlparse
 
@@ -31,6 +32,7 @@ CANDIDATES_JS = """
   const out = [];
   document.querySelectorAll(sel).forEach(e => {
     if (!vis(e)) return;
+    if (e.closest('nav, aside, [class*=sidebar], [role=navigation]')) return;  // handled by nav discovery
     const type = (e.getAttribute('type') || '').toLowerCase();
     // Buttons inside a <form> default to "submit" -> skip, we must not submit forms.
     if (e.tagName === 'BUTTON' && e.closest('form') && (type === '' || type === 'submit')) return;
@@ -51,9 +53,10 @@ SNAPSHOT_JS = """
   let h = 0;
   for (let i = 0; i < txt.length; i++) h = (h * 31 + txt.charCodeAt(i)) | 0;
   const count = s => document.querySelectorAll(s).length;
+  const visible = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e); return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
   return {
     h, len: txt.length,
-    dialogs: count(dialogSel),
+    dialogs: Array.from(document.querySelectorAll(dialogSel)).filter(visible).length,
     expanded: count('[aria-expanded=true]'),
     selected: count('[aria-selected=true]'),
   };
@@ -62,8 +65,8 @@ SNAPSHOT_JS = """
 
 INFO_JS = """
 (scopeSel) => {
-  const root = (scopeSel && document.querySelector(scopeSel)) || document;
   const vis = e => e.offsetParent !== null || getComputedStyle(e).position === 'fixed';
+  const root = (scopeSel && Array.from(document.querySelectorAll(scopeSel)).find(vis)) || document;
   const txt = e => (e.innerText || e.value || e.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ');
   return {
     headings: Array.from(root.querySelectorAll('h1,h2,h3,h4,[role=heading]')).filter(vis).map(txt).filter(Boolean).slice(0, 6),
@@ -114,7 +117,7 @@ def page_info(page, scope=None):
 
 
 def dialog_open(page) -> bool:
-    return page.locator(DIALOG_SEL).count() > 0
+    return page.evaluate(SNAPSHOT_JS, DIALOG_SEL)["dialogs"] > 0
 
 
 def settle(page, ms=900):
@@ -130,7 +133,7 @@ def close_dialog(page):
     page.wait_for_timeout(400)
     if dialog_open(page):
         try:
-            page.locator(DIALOG_SEL).get_by_role(
+            _root(page, DIALOG_SEL).get_by_role(
                 "button", name=re.compile(r"close|cancel|dismiss|×|^x$|got it|ok", re.I)
             ).first.click(timeout=1500)
             page.wait_for_timeout(400)
@@ -173,9 +176,14 @@ def find_reset(page, page_url, action, before):
     return "reload"
 
 
-def install_write_block(ctx):
-    """Safe mode: abort POST/PUT/PATCH/DELETE so exploring can't change the user's data."""
-    if not getattr(settings, "BLOCK_WRITES", True):
+def install_write_block(ctx, block=None):
+    """Safe mode: abort POST/PUT/PATCH/DELETE so exploring can't change the user's data.
+
+    block=None -> follow settings.BLOCK_WRITES; block=False (demo mode) -> allow writes.
+    """
+    if block is None:
+        block = getattr(settings, "BLOCK_WRITES", True)
+    if not block:
         return
 
     def handler(route):
@@ -196,3 +204,162 @@ def close_extra_pages(ctx, keep) -> int:
         except Exception:
             pass
     return len(extras)
+
+
+# ---------------------------------------------------------------------------
+# Demo mode: fill forms with sample data and submit them (test accounts only!)
+# ---------------------------------------------------------------------------
+DESTRUCTIVE = re.compile(
+    r"log ?out|sign ?out|delete|remove|destroy|deactivate|unsubscribe|checkout|\bpay\b|cancel|"
+    r"purchase|buy|withdraw|transfer|archive|disable|reject|reset|clear|import|upload",
+    re.I,
+)
+SUBMIT_OK = re.compile(r"save|submit|create|add|register|confirm|update|apply|book|schedule|done|finish", re.I)
+SEARCHISH = re.compile(r"search|filter|query", re.I)
+
+FIELD_CSS = (
+    "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=file])"
+    ":not([type=image]):not([type=reset]):not([type=search]), select, textarea"
+)
+
+META_JS = """
+e => {
+  const lab = (e.id && document.querySelector('label[for="' + CSS.escape(e.id) + '"]')) || e.closest('label');
+  let labText = '';
+  if (lab) { const c = lab.cloneNode(true); c.querySelectorAll('select,input,textarea,option').forEach(x => x.remove()); labText = c.textContent; }
+  const label = (labText || e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.name || '')
+      .trim().replace(/\\s+/g, ' ').slice(0, 50);
+  return {
+    tag: e.tagName.toLowerCase(), type: (e.getAttribute('type') || 'text').toLowerCase(),
+    name: e.name || '', id: e.id || '', placeholder: e.getAttribute('placeholder') || '', label,
+    required: !!e.required, disabled: !!e.disabled, readonly: !!e.readOnly,
+    min: e.min || '', max: e.max || '', options: e.tagName === 'SELECT' ? e.options.length : 0,
+  };
+}
+"""
+
+
+def new_token() -> str:
+    """5 digits, makes sample emails/phones/names unique on every run (avoids duplicate errors)."""
+    return str(random.randint(10000, 99999))
+
+
+def _root(page, scope):
+    """Locator for the scope (e.g. the open dialog) — the first VISIBLE match, else the first."""
+    if not scope:
+        return page.locator("body")
+    loc = page.locator(scope)
+    for i in range(min(loc.count(), 10)):
+        try:
+            if loc.nth(i).is_visible():
+                return loc.nth(i)
+        except Exception:
+            pass
+    return loc.first
+
+
+def form_fields(page, scope=None):
+    """Visible, enabled, fillable fields (search boxes excluded) in a dialog scope or the page."""
+    loc = _root(page, scope).locator(FIELD_CSS).locator("visible=true")
+    out = []
+    for i in range(min(loc.count(), 25)):
+        try:
+            meta = loc.nth(i).evaluate(META_JS)
+        except Exception:
+            continue
+        key = " ".join([meta["name"], meta["id"], meta["placeholder"], meta["label"]])
+        if meta["disabled"] or meta["readonly"] or SEARCHISH.search(key):
+            continue
+        meta["i"] = i
+        out.append(meta)
+    return out
+
+
+def sample_value(meta, token) -> str:
+    key = " ".join([meta["name"], meta["id"], meta["placeholder"], meta["label"]]).lower()
+    t = meta["type"]
+    if t == "email" or "email" in key:
+        return f"demo{token}@example.com"
+    if t == "tel" or re.search(r"phone|mobile|contact no|whatsapp", key):
+        return f"9{token}{token[:4]}"
+    if t == "number":
+        def _int(v, default):
+            try:
+                return int(float(v))
+            except (TypeError, ValueError):
+                return default
+
+        lo, hi = _int(meta["min"], 1), _int(meta["max"], 10**9)
+        return str(min(max(10, lo), hi))
+    if t == "date":
+        return "2026-11-08"
+    if t == "datetime-local":
+        return "2026-11-08T10:00"
+    if t == "time":
+        return "10:00"
+    if t == "password":
+        return "Demo@12345"
+    if t == "url" or "website" in key:
+        return "https://example.com"
+    if "first" in key and "name" in key:
+        return "Demo"
+    if "last" in key and "name" in key:
+        return f"User{token}"
+    if re.search(r"zip|pin ?code|postal", key):
+        return "110001"
+    if meta["tag"] == "textarea" or re.search(r"description|note|comment|address|remark|details", key):
+        return "Sample text entered for the tutorial demo."
+    if "name" in key or "title" in key:
+        return f"Demo {meta['label'] or 'Item'} {token}"[:60]
+    return f"Demo {token}"
+
+
+def fill_form(page, scope, token, slow=False, on_field=None):
+    """Fill every fillable field with sample data. Returns [{label, value}] for narration."""
+    loc = _root(page, scope).locator(FIELD_CSS).locator("visible=true")
+    filled = []
+    for meta in form_fields(page, scope):
+        el = loc.nth(meta["i"])
+        label = meta["label"] or meta["name"] or meta["type"]
+        try:
+            if on_field:
+                on_field(el)
+            if meta["tag"] == "select":
+                if meta["options"] < 2:
+                    continue
+                el.select_option(index=1, timeout=2000)
+                value = el.evaluate("e => (e.options[e.selectedIndex] || {}).text || ''").strip()
+            elif meta["type"] == "checkbox":
+                if not meta["required"]:
+                    continue
+                el.check(timeout=1500)
+                value = "checked"
+            elif meta["type"] == "radio":
+                el.check(timeout=1500)
+                value = "selected"
+            else:
+                value = sample_value(meta, token)
+                if slow:
+                    el.click(timeout=1500)
+                    el.press_sequentially(value, delay=45)
+                else:
+                    el.fill(value, timeout=2000)
+            filled.append({"label": label, "value": value})
+        except Exception:
+            continue
+    return filled
+
+
+def find_submit(page, scope=None):
+    """Locate a safe 'Save/Submit/Create…' button. Returns (locator, name) or (None, '')."""
+    root = _root(page, scope) if scope else page.locator("form")
+    cands = root.locator("button, input[type=submit], [role=button]").locator("visible=true")
+    for i in range(min(cands.count(), 20)):
+        el = cands.nth(i)
+        try:
+            name = (el.inner_text() or el.get_attribute("value") or "").strip().replace("\n", " ")
+        except Exception:
+            continue
+        if name and len(name) < 40 and SUBMIT_OK.search(name) and not DESTRUCTIVE.search(name):
+            return el, name
+    return None, ""

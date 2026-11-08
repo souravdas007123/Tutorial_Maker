@@ -20,6 +20,7 @@ def job_new(request):
             username_enc=encrypt(d["username"]),
             password_enc=encrypt(d["password"]),
             language=d["language"],
+            demo_mode=d["demo_mode"],
         )
         tasks.start_explore(job.pk)
         return redirect("job_detail", pk=job.pk)

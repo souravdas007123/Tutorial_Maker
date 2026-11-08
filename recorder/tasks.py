@@ -30,6 +30,7 @@ def _explore(job_id):
             decrypt(job.password_enc),
             job.work_dir,
             job.rel_dir,
+            demo=job.demo_mode,
         )
         narrator.add_narration(steps, job.language)
         job.steps = steps
